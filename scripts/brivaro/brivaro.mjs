@@ -1,14 +1,92 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as clack from '@clack/prompts';
+import prompts from 'prompts';
 import pc from 'picocolors';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Asumiendo que el script está en scripts/brivaro/brivaro.mjs
 const REPO_ROOT = path.resolve(__dirname, '../../');
 const SKILLS_DIR = path.join(REPO_ROOT, 'skills');
+
+// --- RUTAS DE ARCHIVOS DE PROYECTO ---
 const AGENTS_MD_PATH = path.join(REPO_ROOT, 'AGENTS.md');
+const PRD_MD_PATH = path.join(REPO_ROOT, 'PRD.md');
+const RFC_MD_PATH = path.join(REPO_ROOT, 'RFC.md');
+
+// --- TEMPLATES PARA IA ---
+const PRD_TEMPLATE = `# Product Requirements Document (PRD)
+
+## 1. Problema
+¿Qué problema estamos resolviendo? ¿Quién lo sufre?
+
+## 2. Objetivos
+- Objetivo principal: 
+- Métricas de éxito:
+
+## 3. Historias de Usuario
+- Como [usuario], quiero [acción] para [beneficio].
+
+## 4. Alcance (Out of Scope)
+- Qué entra:
+- Qué queda fuera (No Goals):
+
+## 5. Diseño y UX
+- Diagramas de flujo o flujos de usuario (referencias).
+`;
+
+const RFC_TEMPLATE = `# Request for Comments (RFC)
+
+## 1. Resumen
+Propuesta técnica para implementar [Nombre de la feature].
+
+## 2. Arquitectura
+- Componentes involucrados:
+- Cambios en base de datos (Schema):
+
+## 3. Alternativas descartadas
+- ¿Por qué esta solución es mejor que X?
+
+## 4. Riesgos y Trade-offs
+- Seguridad:
+- Performance:
+`;
+
+const AGENTS_TEMPLATE = `# AGENTS.md
+
+Contexto, reglas y convenciones de este proyecto para los asistentes de IA.
+
+## Cómo usar esta guía
+
+- Empieza aquí para normas transversales del repositorio.
+- Cada componente puede tener su propio \`AGENTS.md\` que sea específica de ese componente. 
+- En el \`AGENTS.md\` raíz se listan el resto de los \`AGENTS.md\`, las skills disponibles y las reglas generales.
+
+## Secciones recomendadas
+
+- **How to Use This Guide:** Indica cómo y cuándo seguir estas reglas.
+- **Available Skills:** Lista breve de skills comunes y su ruta (por ejemplo: skills/typescript/SKILL.md).
+- **Auto-invoke Rules:** Acciones que deben invocar una skill específica antes de modificar código.
+- **Project Overview:** Resumen corto de componentes y tecnologías.
+- **Commit & PR Guidelines:** Estilo de commits, checklist de PR y requisitos de CI.
+
+## Ejemplo rápido de "Available Skills"
+
+- typescript: patrones de tipos y utilidades — skills/typescript/SKILL.md
+- nextjs-15: App Router y Server Actions — skills/nextjs-15/SKILL.md
+- ai-sdk-5: mensajería, streaming — skills/ai-sdk-5/SKILL.md
+
+## Buenas prácticas
+
+- Mantén las entradas de \`SKILL.md\` pequeñas y enfocadas.
+- Cuando crees una nueva skill, actualiza la sección "Available Skills".
+- Para cambios en infra/CI, añade la skill correspondiente en la tabla "Auto-invoke Rules".
+
+## Antes de crear un PR
+
+1. Sigue la convención de commits: \`<type>[scope]: <descripción>\` (feat, fix, docs, chore, test).
+2. Ejecuta linters y tests relevantes.
+3. Añade una entrada de changelog si aplica.
+`;
 
 // --- CONFIGURACIÓN EXACTA DE AGENTES (Solicitada) ---
 const AGENTS =[
@@ -23,21 +101,33 @@ const AGENTS =[
   { id: 'qwen', name: 'Qwen Code', dir: '.qwen/skills', extra: null },
 ];
 
-async function main() {
-  process.stdout.write('\x1Bc'); 
-  
-  clack.intro(pc.bgCyan(pc.black(pc.bold(' 🤖 SKILLS BRIVARO - Entorno IA '))) + ' ' + pc.dim('v2.1 (Auto-Clean)'));
+function logStep(text) {
+  console.log(pc.cyan('ℹ') + ' ' + text);
+}
 
-  // 1. Asegurar que existe AGENTS.md
+async function main() {
+  console.clear();
+  console.log(pc.bgCyan(pc.black(pc.bold(' 🤖 SKILLS BRIVARO - Entorno IA '))) + ' ' + pc.dim('v3.0'));
+  console.log();
+
   if (!fs.existsSync(AGENTS_MD_PATH)) {
-    fs.writeFileSync(AGENTS_MD_PATH, '# AGENTS.md\n\nEste documento proporciona el contexto, reglas y convenciones de este proyecto para los asistentes de IA.\n');
-    clack.note(`Se ha creado un ${pc.green('AGENTS.md')} base en la raíz del proyecto.`, 'Archivo Creado');
+    fs.writeFileSync(AGENTS_MD_PATH, AGENTS_TEMPLATE);
+    logStep(`Se ha creado un ${pc.green('AGENTS.md')} base en la raíz.`);
   }
 
-  // 2. Asegurar que existe la carpeta skills y leerlas
+  if (!fs.existsSync(PRD_MD_PATH)) {
+    fs.writeFileSync(PRD_MD_PATH, PRD_TEMPLATE);
+    logStep(`Se ha creado un ${pc.green('PRD.md')} base en la raíz.`);
+  }
+
+  if (!fs.existsSync(RFC_MD_PATH)) {
+    fs.writeFileSync(RFC_MD_PATH, RFC_TEMPLATE);
+    logStep(`Se ha creado un ${pc.green('RFC.md')} base en la raíz.`);
+  }
+
   if (!fs.existsSync(SKILLS_DIR)) {
     fs.mkdirSync(SKILLS_DIR, { recursive: true });
-    clack.note(`Se ha creado la carpeta ${pc.green('skills/')} vacía. Añade skills y vuelve a ejecutar.`, 'Aviso');
+    logStep(`Se ha creado la carpeta ${pc.green('skills/')} vacía. Añade skills y vuelve a ejecutar.`);
   }
 
   const availableSkills = fs.readdirSync(SKILLS_DIR, { withFileTypes: true })
@@ -45,18 +135,18 @@ async function main() {
     .map(d => d.name);
 
   if (availableSkills.length > 0) {
-    clack.note(`Detectadas ${pc.cyan(availableSkills.length)} skills disponibles en la carpeta fuente.`, 'Estado');
+    logStep(`Detectadas ${pc.green(availableSkills.length)} skills disponibles.`);
   }
+  console.log();
 
-  // 3. Detectar IDEs instalados
   const detectedIds = AGENTS.filter(agent => {
     const root = path.join(REPO_ROOT, agent.dir.split('/')[0]);
     return fs.existsSync(root);
   }).map(a => a.id);
 
-  const defaultSelection =[...new Set([...detectedIds, 'universal', 'copilot'])];
+  const defaultSelection = [...new Set([...detectedIds, 'universal', 'copilot'])];
 
-  const sortedAgents =[...AGENTS].sort((a, b) => {
+  const sortedAgents = [...AGENTS].sort((a, b) => {
     const aSelected = defaultSelection.includes(a.id);
     const bSelected = defaultSelection.includes(b.id);
     if (aSelected && !bSelected) return -1;
@@ -64,58 +154,63 @@ async function main() {
     return a.name.localeCompare(b.name);
   });
 
-  // 4. Preguntar IDEs
-  const selectedAgentIds = await clack.multiselect({
-    message: 'Selecciona las herramientas/IDEs con las que vas a trabajar:',
-    options: sortedAgents.map(a => ({
+  // 1. Preguntar IDEs
+  const responseAgents = await prompts({
+    type: 'multiselect',
+    name: 'ids',
+    message: 'Selecciona los IDEs / Asistentes:',
+    choices: sortedAgents.map(a => ({
+      title: a.name,
+      description: defaultSelection.includes(a.id) ? 'Detectado' : '',
       value: a.id,
-      label: a.name,
-      hint: defaultSelection.includes(a.id) ? 'Detectado/Recomendado' : ''
+      selected: defaultSelection.includes(a.id)
     })),
-    initialValues: defaultSelection,
-    required: true,
-    // LA MAGIA: Calculamos el alto de la terminal y dejamos un margen de seguridad de 10 líneas
-    maxItems: process.stdout.rows ? Math.max(5, process.stdout.rows - 10) : 10
+    min: 1,
+    optionsPerPage: 10,
+    instructions: pc.dim('\n  ↑/↓: Mover | Espacio: Marcar | Intro: Confirmar')
+  }, {
+    onCancel: () => { console.log(pc.red('Operación cancelada.')); process.exit(0); }
   });
 
-  if (clack.isCancel(selectedAgentIds) || selectedAgentIds.length === 0) {
-    clack.cancel('Operación cancelada.');
-    process.exit(0);
-  }
+  const selectedAgentIds = responseAgents.ids;
 
-  // 5. Preguntar Skills
+  // 2. Preguntar Skills (¡AQUÍ ESTÁ LA BÚSQUEDA EN TIEMPO REAL!)
   let finalSkills =[];
   if (availableSkills.length > 0) {
-    const firstAgent = AGENTS.find(a => a.id === selectedAgentIds[0]);
-    const firstAgentPath = path.join(REPO_ROOT, firstAgent.dir);
-    let activeSkills =[];
-    
-    if (fs.existsSync(firstAgentPath)) {
-      try {
-        activeSkills = fs.readdirSync(firstAgentPath).filter(name => availableSkills.includes(name));
-      } catch (e) {}
+    let activeSkillsSet = new Set();
+    for (const agentId of selectedAgentIds) {
+      const agent = AGENTS.find(a => a.id === agentId);
+      const agentPath = path.join(REPO_ROOT, agent.dir);
+      if (fs.existsSync(agentPath)) {
+        try {
+          fs.readdirSync(agentPath).filter(name => availableSkills.includes(name)).forEach(s => activeSkillsSet.add(s));
+        } catch (e) {}
+      }
     }
-    if (activeSkills.length === 0) activeSkills = availableSkills;
+    
+    const activeSkills = Array.from(activeSkillsSet);
 
-    const selectedSkills = await clack.multiselect({
-      message: 'Selecciona las Skills a vincular:',
-      options: availableSkills.map(s => ({ value: s, label: s })),
-      initialValues: activeSkills,
-      required: false,
-      // LA MAGIA AQUÍ TAMBIÉN:
-      maxItems: process.stdout.rows ? Math.max(5, process.stdout.rows - 10) : 10
+    // autocompleteMultiselect: Permite escribir para buscar
+    const responseSkills = await prompts({
+      type: 'autocompleteMultiselect',
+      name: 'skills',
+      message: 'Selecciona las Skills a vincular (Escribe para buscar):',
+      choices: availableSkills.map(s => ({
+        title: s,
+        value: s,
+        selected: activeSkills.includes(s)
+      })),
+      optionsPerPage: 12,
+      instructions: pc.dim('\n  Teclado: Buscar | Espacio: Marcar | Intro: Confirmar')
+    }, {
+      onCancel: () => { console.log(pc.red('Operación cancelada.')); process.exit(0); }
     });
 
-    if (clack.isCancel(selectedSkills)) {
-      clack.cancel('Operación cancelada.');
-      process.exit(0);
-    }
-    finalSkills = selectedSkills ||[];
+    finalSkills = responseSkills.skills ||[];
   }
 
-  // 6. Instalación y Configuración
-  const spinner = clack.spinner();
-  spinner.start('Configurando entorno y limpiando archivos residuales...');
+  console.log();
+  process.stdout.write(pc.cyan('Sincronizando el entorno... '));
 
   try {
     let ops = { links: 0, cleaned: 0, copies: 0 };
@@ -136,13 +231,11 @@ async function main() {
         });
       }
 
-      // A. LIMPIEZA PROFUNDA: Busca y destruye enlaces rotos, carpetas residuales y skills no seleccionadas
+      // LIMPIEZA PROFUNDA
       const installedItems = fs.readdirSync(destDir);
       for (const item of installedItems) {
-        // Ignoramos archivos invisibles del sistema como .DS_Store en Mac
         if (item === '.DS_Store') continue;
 
-        // Si el elemento en el destino NO está en nuestra lista de skills final, es residual. A la basura.
         if (!finalSkills.includes(item)) {
           const itemPath = path.join(destDir, item);
           try {
@@ -150,17 +243,14 @@ async function main() {
             if (stat.isDirectory()) {
               fs.rmSync(itemPath, { recursive: true, force: true });
             } else {
-              // fs.unlinkSync borra archivos y symlinks (incluso los rotos)
               fs.unlinkSync(itemPath); 
             }
             ops.cleaned++;
-          } catch (err) {
-            // Ignoramos si ya se borró de otra forma
-          }
+          } catch (err) {}
         }
       }
 
-      // B. INSTALACIÓN (Symlinks inteligentes / Junctions)
+      // INSTALACIÓN
       for (const skill of finalSkills) {
         const src = path.join(SKILLS_DIR, skill);
         const dest = path.join(destDir, skill);
@@ -186,7 +276,7 @@ async function main() {
         }
       }
 
-      // C. EXTRAS (Mapeo de AGENTS.md)
+      // EXTRAS (AGENTS.md)
       if (agent.extra) {
         const srcFile = path.join(REPO_ROOT, agent.extra.src);
         if (fs.existsSync(srcFile)) {
@@ -198,17 +288,18 @@ async function main() {
       }
     }
 
-    spinner.stop('¡Entorno de IA configurado y purgado con éxito!');
+    console.log(pc.green('¡Completado!\n'));
 
-    let msg = `✨ Todo listo. ${ops.links} skills vinculadas`;
+    let msg = `✨ Entorno listo. ${pc.bold(ops.links)} skills vinculadas`;
     if (ops.copies > 0) msg += ` y ${ops.copies} copias`;
     if (ops.cleaned > 0) msg += ` (🧹 ${ops.cleaned} residuos eliminados)`;
     
-    clack.outro(pc.green(msg));
+    console.log(pc.green(msg));
+    console.log();
 
   } catch (error) {
-    spinner.stop('Error durante la instalación.');
-    console.error(pc.red(error.message));
+    console.log(pc.red('\nError durante la instalación:'));
+    console.error(error.message);
   }
 }
 

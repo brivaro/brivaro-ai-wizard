@@ -12,6 +12,6 @@ OpenSpec, to save summaries from subagents in Orchestrator Agent Workflows: http
 
 OpenCode docs: https://opencode.ai/docs
 
-Gentleman Programing: https://github.com/Gentleman-Programming
+Gentleman Programing con ENGRAM, GGA, SDDSkills: https://github.com/Gentleman-Programming
 
 Curated Skills from Claude, Gemini, Codex, and more... In Github Repositories. 

@@ -5,7 +5,7 @@ description: >
   Trigger: {When the AI should load this skill - be specific}.
 license: Apache-2.0
 metadata:
-  author: prowler-cloud
+  author: brivaro
   version: "1.0"
 ---
 
