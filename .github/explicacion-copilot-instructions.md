@@ -1,0 +1,1 @@
+Es el equivalente exacto a la plantilla AGENTS.md, GEMINI.md, CLAUDE.md... que hicimos en el directorio raíz. Se aplica a todo el repositorio. Copilot lo lee para saber qué versión de lenguaje usas, cómo compilar y qué reglas de estilo seguir.

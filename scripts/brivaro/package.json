@@ -1,0 +1,13 @@
+{
+  "name": "skills-brivaro",
+  "version": "1.0.0",
+  "description": "Asistente inteligente de Skills IA",
+  "type": "module",
+  "scripts": {
+    "start": "node brivaro.mjs"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "picocolors": "^1.0.0"
+  }
+}
