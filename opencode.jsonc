@@ -1,0 +1,8 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "compaction": {
+    "auto": true, // Cuando el contexto se llena, lanza automáticamente el "Agente de Compactación" oculto.
+    "prune": true // Borra los resultados de herramientas viejas (logs largos de bash o lecturas de archivos pasadas) para ahorrar tokens antes incluso de tener que resumir todo.
+  },
+  
+}

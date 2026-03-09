@@ -210,7 +210,7 @@ async function main() {
   }
 
   console.log();
-  process.stdout.write(pc.cyan('Sincronizando el entorno... '));
+  process.stdout.write(pc.cyan('Sincronizando el entorno...\n'));
 
   try {
     let ops = { links: 0, cleaned: 0, copies: 0 };
@@ -229,6 +229,17 @@ async function main() {
           const dirPath = path.join(REPO_ROOT, dir);
           if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
         });
+      }
+
+      if (agentId === 'universal' && !fs.existsSync(path.join(REPO_ROOT, '.opencode'))) {
+        const opencodeDir = path.join(REPO_ROOT, '.opencode');
+        const subdirs = ['agents', 'commands', 'modes', 'plugins', 'skills', 'tools'];
+        if (!fs.existsSync(opencodeDir)) fs.mkdirSync(opencodeDir, { recursive: true });
+        subdirs.forEach(sd => {
+          const p = path.join(opencodeDir, sd);
+          if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+        });
+        logStep(`Se ha creado la carpeta ${pc.green('.opencode/')} con subdirectorios básicos.`);
       }
 
       // LIMPIEZA PROFUNDA

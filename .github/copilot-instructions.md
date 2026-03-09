@@ -21,6 +21,7 @@ Contexto, reglas y convenciones de este proyecto para los asistentes de IA.
 - typescript: patrones de tipos y utilidades — skills/typescript/SKILL.md
 - nextjs-15: App Router y Server Actions — skills/nextjs-15/SKILL.md
 - ai-sdk-5: mensajería, streaming — skills/ai-sdk-5/SKILL.md
+- review-project: Analyzes a project to find implementable ideas and areas for improvement — skills/revisar-el-proyecto/SKILL.md
 
 ## Buenas prácticas
 
