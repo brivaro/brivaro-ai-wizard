@@ -24,6 +24,17 @@
 			"args": [
 				"markitdown-mcp@0.0.1a4"
 			],
+		},
+		"TestSprite": {
+			"command": "npx",
+			"args": [
+				"@testsprite/testsprite-mcp@latest",
+				"server",
+			],
+			"envFile": "${workspaceFolder}/.env",
+			"env": {
+				"API_KEY": "${env:API_KEY}"
+			}
 		}
 	},
 	"inputs": [

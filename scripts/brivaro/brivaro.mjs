@@ -318,7 +318,7 @@ async function main() {
         });
       }
 
-      if (agentId === 'universal' && !fs.existsSync(path.join(REPO_ROOT, '.opencode'))) {
+      if (agentId === 'universal') {
         const opencodeDir = path.join(REPO_ROOT, '.opencode');
         const subdirs = ['agents', 'commands', 'modes', 'plugins', 'skills', 'tools'];
         if (!fs.existsSync(opencodeDir)) fs.mkdirSync(opencodeDir, { recursive: true });
@@ -327,6 +327,46 @@ async function main() {
           if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
         });
         logStep(`Se ha creado la carpeta ${pc.green('.opencode/')} con subdirectorios básicos.`);
+
+        // Sincronizar skills también en .opencode/skills para compatibilidad con OpenCode
+        const opencodeSkillsDir = path.join(opencodeDir, 'skills');
+        const installedOpencodeSkills = fs.readdirSync(opencodeSkillsDir);
+        for (const item of installedOpencodeSkills) {
+          if (item === '.DS_Store') continue;
+
+          if (!finalSkills.includes(item)) {
+            const itemPath = path.join(opencodeSkillsDir, item);
+            try {
+              const stat = fs.lstatSync(itemPath);
+              if (stat.isDirectory()) {
+                fs.rmSync(itemPath, { recursive: true, force: true });
+              } else {
+                fs.unlinkSync(itemPath);
+              }
+            } catch (err) {}
+          }
+        }
+
+        for (const skill of finalSkills) {
+          const src = path.join(SKILLS_DIR, skill);
+          const dest = path.join(opencodeSkillsDir, skill);
+
+          if (fs.existsSync(dest)) {
+            const stats = fs.lstatSync(dest);
+            if (stats.isSymbolicLink()) continue;
+            if (stats.isDirectory()) {
+              fs.rmSync(dest, { recursive: true, force: true });
+            }
+          }
+
+          try {
+            const type = process.platform === 'win32' ? 'junction' : 'dir';
+            const relPath = path.relative(opencodeSkillsDir, src);
+            fs.symlinkSync(relPath, dest, type);
+          } catch (e) {
+            try { fs.cpSync(src, dest, { recursive: true }); } catch (err) {}
+          }
+        }
       }
 
       // LIMPIEZA PROFUNDA
