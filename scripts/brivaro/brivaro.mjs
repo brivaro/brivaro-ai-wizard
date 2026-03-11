@@ -8,6 +8,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '../../');
 const SKILLS_DIR = path.join(REPO_ROOT, 'skills');
 
+// --- RUTAS Y PLANTILLAS DE DOCUMENTACIÓN ---
+const DOCS_DIR = path.join(REPO_ROOT, 'docs');
+const ARCHITECTURE_MD_PATH = path.join(DOCS_DIR, 'architecture.md');
+
+// --- RUTAS PARA TOOLS ---
+const TOOLS_DIR = path.join(REPO_ROOT, 'tools');
+
 // --- RUTAS DE ARCHIVOS DE PROYECTO ---
 const AGENTS_MD_PATH = path.join(REPO_ROOT, 'AGENTS.md');
 const PRD_MD_PATH = path.join(REPO_ROOT, 'PRD.md');
@@ -86,6 +93,33 @@ Contexto, reglas y convenciones de este proyecto para los asistentes de IA.
 1. Sigue la convención de commits: \`<type>[scope]: <descripción>\` (feat, fix, docs, chore, test).
 2. Ejecuta linters y tests relevantes.
 3. Añade una entrada de changelog si aplica.
+`;
+
+const ARCHITECTURE_TEMPLATE = `# Arquitectura del Proyecto
+
+## Visión general
+Breve descripción de la arquitectura general, componentes principales y responsabilidades. Si hay muchos elementos de infraestructura, considera crear subdocumentos para cada uno y meterlos por separado en la carpeta \`docs/architecture/\` para explicar cada componente de forma resumida y no inundar al agente de IA con información excesiva.
+
+## Componentes
+- **Frontend**: descripción, tecnologías.
+- **Backend / API**: descripción, endpoints clave, responsabilidades.
+- **Bases de datos**: modelos, particionamiento/replicación, backups.
+- **Integraciones externas**: colas, servicios de terceros, autenticación.
+
+## Decisiones de diseño
+- Resumen de decisiones arquitectónicas clave, con enlaces a los documentos en \`docs/decisions/\` que expliquen cada decisión de forma resumida (ej. elección de base de datos, patróns de diseño, etc.).
+
+## Diagramas
+- Incluye diagramas de alto nivel (referenciar imágenes o archivos dot/mermaid).
+
+## Escalabilidad y disponibilidad
+- Consideraciones para scale-out, balanceo, tolerancia a fallos.
+
+## Seguridad
+- Autenticación, autorización, gestión de secretos, límites de rate.
+
+## Operaciones y runbooks
+- Referencia a la carpeta \`runbooks/\` para procedimientos operativos.
 `;
 
 // --- CONFIGURACIÓN EXACTA DE AGENTES (Solicitada) ---
@@ -207,6 +241,59 @@ async function main() {
     });
 
     finalSkills = responseSkills.skills ||[];
+  }
+
+  // Preguntar si crear la estructura `docs/` para documentación
+  const docsResponse = await prompts({
+    type: 'confirm',
+    name: 'createDocs',
+    message: '¿Crear estructura `docs/` para documentación del proyecto (architecture.md, decisions/, runbooks/, architecture/)?',
+    initial: true
+  }, {
+    onCancel: () => { console.log(pc.red('Operación cancelada.')); process.exit(0); }
+  });
+
+  if (docsResponse.createDocs) {
+    try {
+      if (!fs.existsSync(DOCS_DIR)) fs.mkdirSync(DOCS_DIR, { recursive: true });
+
+      if (!fs.existsSync(ARCHITECTURE_MD_PATH)) {
+        fs.writeFileSync(ARCHITECTURE_MD_PATH, ARCHITECTURE_TEMPLATE);
+        logStep(`Se ha creado ${pc.green('docs/architecture.md')}.`);
+      }
+
+      const decisionsDir = path.join(DOCS_DIR, 'decisions');
+      const runbooksDir = path.join(DOCS_DIR, 'runbooks');
+      const architectureDir = path.join(DOCS_DIR, 'architecture');
+      if (!fs.existsSync(decisionsDir)) fs.mkdirSync(decisionsDir, { recursive: true });
+      if (!fs.existsSync(runbooksDir)) fs.mkdirSync(runbooksDir, { recursive: true });
+      if (!fs.existsSync(architectureDir)) fs.mkdirSync(architectureDir, { recursive: true });
+      logStep(`Se han creado ${pc.green('docs/decisions/')} y ${pc.green('docs/runbooks/')} (vacías).`);
+    } catch (err) {
+      console.error(pc.red('Error al crear docs/:'), err.message);
+    }
+  }
+
+  // Preguntar si crear la estructura `tools/` (scripts/ prompts/)
+  const toolsResponse = await prompts({
+    type: 'confirm',
+    name: 'createTools',
+    message: '¿Crear estructura `tools/` con `scripts/` y `prompts/`?',
+    initial: false
+  }, {
+    onCancel: () => { console.log(pc.red('Operación cancelada.')); process.exit(0); }
+  });
+
+  if (toolsResponse.createTools) {
+    try {
+      const toolsScripts = path.join(TOOLS_DIR, 'scripts');
+      const toolsPrompts = path.join(TOOLS_DIR, 'prompts');
+      if (!fs.existsSync(toolsScripts)) fs.mkdirSync(toolsScripts, { recursive: true });
+      if (!fs.existsSync(toolsPrompts)) fs.mkdirSync(toolsPrompts, { recursive: true });
+      logStep(`Se han creado ${pc.green('tools/scripts/')} y ${pc.green('tools/prompts/')} (vacías).`);
+    } catch (err) {
+      console.error(pc.red('Error al crear tools/:'), err.message);
+    }
   }
 
   console.log();
