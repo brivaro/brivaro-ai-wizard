@@ -170,17 +170,38 @@ async function main() {
     process.exit(1);
   }
 
-  if (!fs.existsSync(AGENTS_MD_PATH)) {
+  const fileOptions = [
+    { title: 'AGENTS.md', value: 'agents' },
+    { title: 'PRD.md', value: 'prd' },
+    { title: 'RFC.md', value: 'rfc' }
+  ];
+
+  const responseFiles = await prompts({
+    type: 'multiselect',
+    name: 'files',
+    message: '¿Qué archivos quieres crear?',
+    choices: fileOptions,
+    instructions: pc.dim('\n  ↑/↓: Mover | Espacio: Marcar | Intro: Confirmar')
+  }, {
+    onCancel: () => {
+      console.log(pc.red('Operación cancelada.'));
+      process.exit(0);
+    }
+  });
+
+  const selectedFiles = responseFiles.files || [];
+
+  if (selectedFiles.includes('agents') && !fs.existsSync(AGENTS_MD_PATH)) {
     fs.writeFileSync(AGENTS_MD_PATH, AGENTS_TEMPLATE);
     logStep(`Se ha creado un ${pc.green('AGENTS.md')} base en la raíz.`);
   }
 
-  if (!fs.existsSync(PRD_MD_PATH)) {
+  if (selectedFiles.includes('prd') && !fs.existsSync(PRD_MD_PATH)) {
     fs.writeFileSync(PRD_MD_PATH, PRD_TEMPLATE);
     logStep(`Se ha creado un ${pc.green('PRD.md')} base en la raíz.`);
   }
 
-  if (!fs.existsSync(RFC_MD_PATH)) {
+  if (selectedFiles.includes('rfc') && !fs.existsSync(RFC_MD_PATH)) {
     fs.writeFileSync(RFC_MD_PATH, RFC_TEMPLATE);
     logStep(`Se ha creado un ${pc.green('RFC.md')} base en la raíz.`);
   }
