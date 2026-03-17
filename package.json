@@ -1,7 +1,12 @@
 {
   "name": "brivaro-ai-wizard",
   "version": "1.0.0",
+  "type": "module",
   "bin": {
     "brivaro": "scripts/brivaro/brivaro.mjs"
+  },
+  "dependencies": {
+    "picocolors": "^1.0.0",
+    "prompts": "^2.4.2"
   }
 }
