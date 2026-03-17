@@ -33,7 +33,7 @@
 			],
 			"envFile": "${workspaceFolder}/.env",
 			"env": {
-				"API_KEY": "${env:API_KEY}"
+				"API_KEY": "${env:TESTSPRITE_API_KEY}"
 			}
 		}
 	},
