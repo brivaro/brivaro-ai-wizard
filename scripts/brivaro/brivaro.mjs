@@ -200,7 +200,7 @@ async function main() {
   console.log();
 
   const detectedIds = AGENTS.filter(agent => {
-    const root = path.join(REPO_ROOT, agent.dir.split('/')[0]);
+    const root = path.join(PROJECT_ROOT, agent.dir.split('/')[0]);
     return fs.existsSync(root);
   }).map(a => a.id);
 
@@ -240,7 +240,7 @@ async function main() {
     let activeSkillsSet = new Set();
     for (const agentId of selectedAgentIds) {
       const agent = AGENTS.find(a => a.id === agentId);
-      const agentPath = path.join(REPO_ROOT, agent.dir);
+      const agentPath = path.join(PROJECT_ROOT, agent.dir);
       if (fs.existsSync(agentPath)) {
         try {
           fs.readdirSync(agentPath).filter(name => availableSkills.includes(name)).forEach(s => activeSkillsSet.add(s));
@@ -330,7 +330,7 @@ async function main() {
 
     for (const agentId of selectedAgentIds) {
       const agent = AGENTS.find(a => a.id === agentId);
-      const destDir = path.join(REPO_ROOT, agent.dir);
+      const destDir = path.join(PROJECT_ROOT, agent.dir);
       const destRootDir = path.dirname(destDir);
 
       if (!fs.existsSync(destRootDir)) fs.mkdirSync(destRootDir, { recursive: true });
@@ -339,13 +339,13 @@ async function main() {
       if (agentId === 'copilot') {
         const githubDirs = ['.github/agents', '.github/instructions', '.github/prompts'];
         githubDirs.forEach(dir => {
-          const dirPath = path.join(REPO_ROOT, dir);
+          const dirPath = path.join(PROJECT_ROOT, dir);
           if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
         });
       }
 
       if (agentId === 'universal') {
-        const opencodeDir = path.join(REPO_ROOT, '.opencode');
+        const opencodeDir = path.join(PROJECT_ROOT, '.opencode');
         const subdirs = ['agents', 'commands', 'modes', 'plugins', 'skills', 'tools'];
         if (!fs.existsSync(opencodeDir)) fs.mkdirSync(opencodeDir, { recursive: true });
         subdirs.forEach(sd => {
@@ -442,9 +442,9 @@ async function main() {
 
       // EXTRAS (AGENTS.md)
       if (agent.extra) {
-        const srcFile = path.join(REPO_ROOT, agent.extra.src);
+        const srcFile = path.join(PROJECT_ROOT, agent.extra.src);
         if (fs.existsSync(srcFile)) {
-          const destFile = path.join(REPO_ROOT, agent.extra.dest);
+          const destFile = path.join(PROJECT_ROOT, agent.extra.dest);
           const destFileDir = path.dirname(destFile);
           if (!fs.existsSync(destFileDir)) fs.mkdirSync(destFileDir, { recursive: true });
           fs.copyFileSync(srcFile, destFile);
