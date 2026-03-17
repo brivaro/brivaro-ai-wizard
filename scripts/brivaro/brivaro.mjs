@@ -11,16 +11,16 @@ const PROJECT_ROOT = process.cwd();
 const CLI_ROOT = path.resolve(__dirname, '../../');
 
 // --- RUTAS Y PLANTILLAS DE DOCUMENTACIÓN ---
-const DOCS_DIR = path.join(REPO_ROOT, 'docs');
+const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
 const ARCHITECTURE_MD_PATH = path.join(DOCS_DIR, 'architecture.md');
 
 // --- RUTAS PARA TOOLS ---
-const TOOLS_DIR = path.join(REPO_ROOT, 'tools');
+const TOOLS_DIR = path.join(PROJECT_ROOT, 'tools');
 
 // --- RUTAS DE ARCHIVOS DE PROYECTO ---
-const AGENTS_MD_PATH = path.join(REPO_ROOT, 'AGENTS.md');
-const PRD_MD_PATH = path.join(REPO_ROOT, 'PRD.md');
-const RFC_MD_PATH = path.join(REPO_ROOT, 'RFC.md');
+const AGENTS_MD_PATH = path.join(PROJECT_ROOT, 'AGENTS.md');
+const PRD_MD_PATH = path.join(PROJECT_ROOT, 'PRD.md');
+const RFC_MD_PATH = path.join(PROJECT_ROOT, 'RFC.md');
 
 // --- TEMPLATES PARA IA ---
 const PRD_TEMPLATE = `# Product Requirements Document (PRD)
