@@ -146,26 +146,6 @@ async function main() {
   console.log(pc.bgCyan(pc.black(pc.bold(' 🤖 SKILLS BRIVARO - Entorno IA '))) + ' ' + pc.dim('v3.0'));
   console.log();
 
-  if (!fs.existsSync(AGENTS_MD_PATH)) {
-    fs.writeFileSync(AGENTS_MD_PATH, AGENTS_TEMPLATE);
-    logStep(`Se ha creado un ${pc.green('AGENTS.md')} base en la raíz.`);
-  }
-
-  if (!fs.existsSync(PRD_MD_PATH)) {
-    fs.writeFileSync(PRD_MD_PATH, PRD_TEMPLATE);
-    logStep(`Se ha creado un ${pc.green('PRD.md')} base en la raíz.`);
-  }
-
-  if (!fs.existsSync(RFC_MD_PATH)) {
-    fs.writeFileSync(RFC_MD_PATH, RFC_TEMPLATE);
-    logStep(`Se ha creado un ${pc.green('RFC.md')} base en la raíz.`);
-  }
-
-  if (!fs.existsSync(SKILLS_DIR)) {
-    fs.mkdirSync(SKILLS_DIR, { recursive: true });
-    logStep(`Se ha creado la carpeta ${pc.green('skills/')} vacía. Añade skills y vuelve a ejecutar.`);
-  }
-
   const sourceResponse = await prompts({
     type: 'select',
     name: 'source',
@@ -188,6 +168,26 @@ async function main() {
   if (!fs.existsSync(SKILLS_DIR)) {
     console.log(pc.yellow('⚠ No existe carpeta skills/ en este proyecto'));
     process.exit(1);
+  }
+
+  if (!fs.existsSync(AGENTS_MD_PATH)) {
+    fs.writeFileSync(AGENTS_MD_PATH, AGENTS_TEMPLATE);
+    logStep(`Se ha creado un ${pc.green('AGENTS.md')} base en la raíz.`);
+  }
+
+  if (!fs.existsSync(PRD_MD_PATH)) {
+    fs.writeFileSync(PRD_MD_PATH, PRD_TEMPLATE);
+    logStep(`Se ha creado un ${pc.green('PRD.md')} base en la raíz.`);
+  }
+
+  if (!fs.existsSync(RFC_MD_PATH)) {
+    fs.writeFileSync(RFC_MD_PATH, RFC_TEMPLATE);
+    logStep(`Se ha creado un ${pc.green('RFC.md')} base en la raíz.`);
+  }
+
+  if (!fs.existsSync(SKILLS_DIR)) {
+    fs.mkdirSync(SKILLS_DIR, { recursive: true });
+    logStep(`Se ha creado la carpeta ${pc.green('skills/')} vacía. Añade skills y vuelve a ejecutar.`);
   }
 
   const availableSkills = fs.readdirSync(SKILLS_DIR, { withFileTypes: true })
