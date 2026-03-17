@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "wizard": "cd scripts/brivaro && pnpm install && node brivaro.mjs"
+  }
+}
