@@ -152,7 +152,7 @@ async function main() {
     message: '¿De dónde quieres cargar las skills?',
     choices: [
       { title: '📦 Repo Brivaro-Wizard', value: 'cli' },
-      { title: '🗂 Proyecto actual', value: 'project' }
+      { title: '⬇️ Proyecto actual', value: 'project' }
     ],
     initial: 0
   });
