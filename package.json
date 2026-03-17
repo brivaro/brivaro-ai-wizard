@@ -1,5 +1,7 @@
 {
-  "scripts": {
-    "wizard": "cd scripts/brivaro && pnpm install && node brivaro.mjs"
+  "name": "brivaro-ai-wizard",
+  "version": "1.0.0",
+  "bin": {
+    "brivaro": "scripts/brivaro/brivaro.mjs"
   }
 }

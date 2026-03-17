@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -5,8 +7,8 @@ import prompts from 'prompts';
 import pc from 'picocolors';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, '../../');
-const SKILLS_DIR = path.join(REPO_ROOT, 'skills');
+const PROJECT_ROOT = process.cwd();
+const CLI_ROOT = path.resolve(__dirname, '../../');
 
 // --- RUTAS Y PLANTILLAS DE DOCUMENTACIÓN ---
 const DOCS_DIR = path.join(REPO_ROOT, 'docs');
@@ -162,6 +164,30 @@ async function main() {
   if (!fs.existsSync(SKILLS_DIR)) {
     fs.mkdirSync(SKILLS_DIR, { recursive: true });
     logStep(`Se ha creado la carpeta ${pc.green('skills/')} vacía. Añade skills y vuelve a ejecutar.`);
+  }
+
+  const sourceResponse = await prompts({
+    type: 'select',
+    name: 'source',
+    message: '¿De dónde quieres cargar las skills?',
+    choices: [
+      { title: '📦 Repo Brivaro-Wizard', value: 'cli' },
+      { title: '🗂 Proyecto actual', value: 'project' }
+    ],
+    initial: 0
+  });
+
+  let SKILLS_DIR;
+
+  if (sourceResponse.source === 'cli') {
+    SKILLS_DIR = path.join(CLI_ROOT, 'skills');
+  } else {
+    SKILLS_DIR = path.join(PROJECT_ROOT, 'skills');
+  }
+
+  if (!fs.existsSync(SKILLS_DIR)) {
+    console.log(pc.yellow('⚠ No existe carpeta skills/ en este proyecto'));
+    process.exit(1);
   }
 
   const availableSkills = fs.readdirSync(SKILLS_DIR, { withFileTypes: true })
