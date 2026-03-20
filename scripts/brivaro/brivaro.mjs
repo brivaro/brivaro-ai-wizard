@@ -391,7 +391,7 @@ async function main() {
     choices: [
       { title: '📦 Repo Brivaro-Wizard', value: 'cli' },
       { title: '💻 Repo Proyecto Actual', value: 'project' },
-      { title: '🌐 Repo remoto (URL)', value: 'remote' },
+      { title: '🌐 Repo Remoto (URL)', value: 'remote' },
     ],
     initial: 0
   }, {
