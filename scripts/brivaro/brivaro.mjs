@@ -2,13 +2,18 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
 import prompts from 'prompts';
 import pc from 'picocolors';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = process.cwd();
 const CLI_ROOT = path.resolve(__dirname, '../../');
+
+// --- SKILLS: fuente de verdad centralizada en el proyecto destino ---
+const PROJECT_SKILLS_DIR = path.join(PROJECT_ROOT, 'skills');
 
 // --- RUTAS Y PLANTILLAS DE DOCUMENTACIÓN ---
 const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
@@ -83,6 +88,7 @@ Contexto, reglas y convenciones de este proyecto para los asistentes de IA.
 - typescript: patrones de tipos y utilidades — skills/typescript/SKILL.md
 - nextjs-15: App Router y Server Actions — skills/nextjs-15/SKILL.md
 - ai-sdk-5: mensajería, streaming — skills/ai-sdk-5/SKILL.md
+- review-project: Analyzes a project to find implementable ideas and areas for improvement — skills/revisar-el-proyecto/SKILL.md
 
 ## Buenas prácticas
 
@@ -124,8 +130,8 @@ Breve descripción de la arquitectura general, componentes principales y respons
 - Referencia a la carpeta \`runbooks/\` para procedimientos operativos.
 `;
 
-// --- CONFIGURACIÓN EXACTA DE AGENTES (Solicitada) ---
-const AGENTS =[
+// --- CONFIGURACIÓN EXACTA DE AGENTES ---
+const AGENTS = [
   { id: 'universal', name: 'Universal (Cursor, Cline, OpenCode, Amp, Kimi, Replit)', dir: '.agents/skills', extra: null },
   { id: 'copilot', name: 'GitHub Copilot', dir: '.github/skills', extra: { src: 'AGENTS.md', dest: '.github/copilot-instructions.md' } },
   { id: 'claude', name: 'Claude Code', dir: '.claude/skills', extra: { src: 'AGENTS.md', dest: 'CLAUDE.md' } },
@@ -141,35 +147,301 @@ function logStep(text) {
   console.log(pc.cyan('ℹ') + ' ' + text);
 }
 
+function logWarn(text) {
+  console.log(pc.yellow('⚠') + ' ' + text);
+}
+
+function logError(text) {
+  console.log(pc.red('✖') + ' ' + text);
+}
+
+/**
+ * Detecta la carpeta "contenedor de skills" dentro de un directorio dado.
+ *
+ * Estrategia (en orden de prioridad):
+ *  1. ¿Existe <repoDir>/skills/ con al menos una skill? → devuélvela
+ *  2. ¿Existe <repoDir>/<sub>/skills/ con al menos una skill? → devuélvela
+ *  3. Búsqueda recursiva (max depth 4): recoge TODOS los dirs que tengan
+ *     SKILL.md dentro (sin importar a qué nivel). Los agrega en un dir
+ *     virtual _skills_agg/ dentro del repo para no perder ninguna.
+ */
+function detectSkillsDir(repoDir) {
+  // 1. Ruta directa
+  const direct = path.join(repoDir, 'skills');
+  if (fs.existsSync(direct) && listSkillsIn(direct).length > 0) return direct;
+
+  // 2. Monorepo de primer nivel
+  for (const entry of fs.readdirSync(repoDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+    const candidate = path.join(repoDir, entry.name, 'skills');
+    if (fs.existsSync(candidate) && listSkillsIn(candidate).length > 0) return candidate;
+  }
+
+  // 3. Búsqueda recursiva — colectar TODAS las skill-dirs sin importar padre
+  const SKIP_DIRS = new Set(['.git', 'node_modules', '.github', '__pycache__', '_skills_agg']);
+
+  /** @type {Array<{name: string, fullPath: string}>} */
+  const allSkills = [];
+
+  function walk(dir, depth) {
+    if (depth > 4) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || SKIP_DIRS.has(entry.name)) continue;
+      const fullPath = path.join(dir, entry.name);
+      const skillMd = path.join(fullPath, 'SKILL.md');
+
+      if (fs.existsSync(skillMd)) {
+        allSkills.push({ name: entry.name, fullPath });
+      } else {
+        // Seguir bajando
+        walk(fullPath, depth + 1);
+      }
+    }
+  }
+
+  walk(repoDir, 0);
+
+  if (allSkills.length === 0) return null;
+
+  // Crear un directorio virtual de agregación con junctions/symlinks
+  // a TODAS las skills encontradas. Vive dentro del tmpDir → se limpia solo.
+  const aggDir = path.join(repoDir, '_skills_agg');
+  fs.mkdirSync(aggDir, { recursive: true });
+
+  const type = process.platform === 'win32' ? 'junction' : 'dir';
+  const seen = new Set();
+
+  for (const skill of allSkills) {
+    // Si hay nombre duplicado, el primero encontrado gana
+    if (seen.has(skill.name)) continue;
+    seen.add(skill.name);
+
+    const dest = path.join(aggDir, skill.name);
+    try {
+      fs.symlinkSync(skill.fullPath, dest, type);
+    } catch { }
+  }
+
+  return aggDir;
+}
+
+/**
+ * Lista las skills válidas (carpetas con SKILL.md) en un directorio.
+ * Usa fs.statSync (sigue symlinks/junctions) para compatibilidad con Windows.
+ */
+function listSkillsIn(skillsDir) {
+  if (!fs.existsSync(skillsDir)) return [];
+  return fs.readdirSync(skillsDir)
+    .filter(name => {
+      const full = path.join(skillsDir, name);
+      try {
+        return fs.statSync(full).isDirectory() &&
+          fs.existsSync(path.join(full, 'SKILL.md'));
+      } catch { return false; }
+    });
+}
+
+/**
+ * Clona un repo remoto en un directorio temporal y devuelve la info.
+ * Usa --depth=1 y --single-branch para no bajar nada innecesario.
+ * El llamador es responsable de limpiar tmpDir.
+ */
+async function cloneRemoteRepo(url) {
+  const tmpDir = path.join(os.tmpdir(), `brivaro-remote-${Date.now()}`);
+
+  logStep(`Clonando ${pc.bold(url)} en directorio temporal...`);
+
+  try {
+    execSync(
+      `git clone --depth=1 --single-branch "${url}" "${tmpDir}"`,
+      { stdio: 'pipe', timeout: 60_000 }
+    );
+  } catch (err) {
+    // Limpiar en caso de error parcial
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { }
+    const msg = err.stderr?.toString().trim() || err.message;
+    throw new Error(`git clone falló: ${msg}`);
+  }
+
+  const skillsDir = detectSkillsDir(tmpDir);
+  if (!skillsDir) {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    throw new Error('No se encontró ninguna carpeta skills/ en el repositorio.');
+  }
+
+  const skills = listSkillsIn(skillsDir);
+  if (skills.length === 0) {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    throw new Error('La carpeta skills/ del repositorio no contiene ninguna skill válida (sin SKILL.md).');
+  }
+
+  return { tmpDir, skillsDir, skills };
+}
+
+/**
+ * Instala skills de una fuente al PROJECT_SKILLS_DIR (additive: no sobreescribe existentes).
+ * Devuelve { installed, skipped }.
+ */
+function installSkillsToRoot(sourceSkillsDir, selectedSkills) {
+  if (!fs.existsSync(PROJECT_SKILLS_DIR)) {
+    fs.mkdirSync(PROJECT_SKILLS_DIR, { recursive: true });
+    logStep(`Creada carpeta centralizada ${pc.green('skills/')} en la raíz del proyecto.`);
+  }
+
+  let installed = 0;
+  let skipped = 0;
+
+  for (const skill of selectedSkills) {
+    const src = path.join(sourceSkillsDir, skill);
+    const dest = path.join(PROJECT_SKILLS_DIR, skill);
+
+    if (fs.existsSync(dest)) {
+      skipped++;
+      continue; // additive: no sobreescribir
+    }
+
+    try {
+      // En Windows, si src es una junction (caso _skills_agg), fs.cpSync intenta
+      // replicarla como symlink → EPERM sin permisos de admin.
+      // realpathSync resuelve el enlace y copiamos el directorio real.
+      const realSrc = fs.realpathSync(src);
+      fs.cpSync(realSrc, dest, { recursive: true });
+      installed++;
+    } catch (err) {
+      logWarn(`No se pudo copiar la skill ${pc.bold(skill)}: ${err.message}`);
+    }
+  }
+
+  return { installed, skipped };
+}
+
+/**
+ * Crea un symlink relativo de un agentSkillDir/skillName → PROJECT_SKILLS_DIR/skillName.
+ * Si ya existe un symlink válido, no hace nada. Si hay un dir físico, lo deja (no destruye nada).
+ * Si el symlink está roto, lo elimina y recrea.
+ */
+function installSymlinkForAgent(agentSkillsDir, skillName) {
+  const dest = path.join(agentSkillsDir, skillName);
+  const src = path.join(PROJECT_SKILLS_DIR, skillName);
+  const relPath = path.relative(agentSkillsDir, src);
+
+  if (fs.existsSync(dest)) {
+    const stat = fs.lstatSync(dest);
+    if (stat.isSymbolicLink()) {
+      // Comprobar si el symlink está roto
+      try {
+        fs.realpathSync(dest);
+        return 'skip'; // symlink válido ya existe
+      } catch {
+        // Roto: lo eliminamos para recrear
+        fs.unlinkSync(dest);
+      }
+    } else {
+      // Es un directorio físico: lo dejamos tal cual (additive)
+      return 'skip';
+    }
+  }
+
+  try {
+    const type = process.platform === 'win32' ? 'junction' : 'dir';
+    fs.symlinkSync(relPath, dest, type);
+    return 'linked';
+  } catch {
+    // Fallback: copia física
+    try {
+      fs.cpSync(src, dest, { recursive: true });
+      return 'copied';
+    } catch {
+      return 'error';
+    }
+  }
+}
+
+/**
+ * Elimina symlinks rotos en un directorio de agente (mantenimiento silencioso).
+ */
+function cleanBrokenSymlinks(dir) {
+  if (!fs.existsSync(dir)) return;
+  for (const item of fs.readdirSync(dir)) {
+    const itemPath = path.join(dir, item);
+    try {
+      const stat = fs.lstatSync(itemPath);
+      if (stat.isSymbolicLink()) {
+        try { fs.realpathSync(itemPath); } catch {
+          fs.unlinkSync(itemPath); // roto
+        }
+      }
+    } catch { }
+  }
+}
+
 async function main() {
   console.clear();
-  console.log(pc.bgCyan(pc.black(pc.bold(' 🤖 SKILLS BRIVARO - Entorno IA '))) + ' ' + pc.dim('v3.0'));
+  console.log(pc.bgCyan(pc.black(pc.bold(' 🤖 SKILLS BRIVARO - Entorno IA '))) + ' ' + pc.dim('v4.0'));
   console.log();
 
+  // --- 1. SELECCIÓN DE FUENTE ---
   const sourceResponse = await prompts({
     type: 'select',
     name: 'source',
     message: '¿De dónde quieres cargar las skills?',
     choices: [
       { title: '📦 Repo Brivaro-Wizard', value: 'cli' },
-      { title: '💻 Repo Proyecto Actual', value: 'project' }
+      { title: '💻 Repo Proyecto Actual', value: 'project' },
+      { title: '🌐 Repo remoto (URL)', value: 'remote' },
     ],
     initial: 0
+  }, {
+    onCancel: () => { console.log(pc.red('Operación cancelada.')); process.exit(0); }
   });
 
-  let SKILLS_DIR;
+  let SKILLS_SOURCE_DIR;
+  let tmpDirToClean = null;
 
   if (sourceResponse.source === 'cli') {
-    SKILLS_DIR = path.join(CLI_ROOT, 'skills');
+    SKILLS_SOURCE_DIR = path.join(CLI_ROOT, 'skills');
+
+    if (!fs.existsSync(SKILLS_SOURCE_DIR)) {
+      logError('No existe carpeta skills/ en el repositorio Brivaro-Wizard.');
+      process.exit(1);
+    }
+
+  } else if (sourceResponse.source === 'project') {
+    SKILLS_SOURCE_DIR = PROJECT_SKILLS_DIR;
+
+    if (!fs.existsSync(SKILLS_SOURCE_DIR)) {
+      logWarn('No existe carpeta skills/ en este proyecto.');
+      process.exit(1);
+    }
+
   } else {
-    SKILLS_DIR = path.join(PROJECT_ROOT, 'skills');
+    // --- FUENTE REMOTA ---
+    const urlResponse = await prompts({
+      type: 'text',
+      name: 'url',
+      message: 'URL del repositorio Git (ej: https://github.com/user/repo):',
+      validate: v => v.trim().length > 0 ? true : 'La URL no puede estar vacía'
+    }, {
+      onCancel: () => { console.log(pc.red('Operación cancelada.')); process.exit(0); }
+    });
+
+    console.log();
+    try {
+      const { tmpDir, skillsDir, skills } = await cloneRemoteRepo(urlResponse.url.trim());
+      tmpDirToClean = tmpDir;
+      SKILLS_SOURCE_DIR = skillsDir;
+      logStep(`Encontradas ${pc.green(skills.length)} skills en el repositorio remoto.`);
+    } catch (err) {
+      logError(err.message);
+      process.exit(1);
+    }
+    console.log();
   }
 
-  if (!fs.existsSync(SKILLS_DIR)) {
-    console.log(pc.yellow('⚠ No existe carpeta skills/ en este proyecto'));
-    process.exit(1);
-  }
-
+  // --- 2. ARCHIVOS BASE (AGENTS.md, PRD, RFC) ---
   const fileOptions = [
     { title: 'AGENTS.md', value: 'agents' },
     { title: 'PRD.md', value: 'prd' },
@@ -184,6 +456,7 @@ async function main() {
     instructions: pc.dim('\n  ↑/↓: Mover | Espacio: Marcar | Intro: Confirmar')
   }, {
     onCancel: () => {
+      cleanup(tmpDirToClean);
       console.log(pc.red('Operación cancelada.'));
       process.exit(0);
     }
@@ -206,20 +479,19 @@ async function main() {
     logStep(`Se ha creado un ${pc.green('RFC.md')} base en la raíz.`);
   }
 
-  if (!fs.existsSync(SKILLS_DIR)) {
-    fs.mkdirSync(SKILLS_DIR, { recursive: true });
-    logStep(`Se ha creado la carpeta ${pc.green('skills/')} vacía. Añade skills y vuelve a ejecutar.`);
-  }
-
-  const availableSkills = fs.readdirSync(SKILLS_DIR, { withFileTypes: true })
-    .filter(d => d.isDirectory() && fs.existsSync(path.join(SKILLS_DIR, d.name, 'SKILL.md')))
-    .map(d => d.name);
+  // --- 3. LISTAR SKILLS DISPONIBLES ---
+  const availableSkills = listSkillsIn(SKILLS_SOURCE_DIR);
 
   if (availableSkills.length > 0) {
     logStep(`Detectadas ${pc.green(availableSkills.length)} skills disponibles.`);
+  } else {
+    logWarn('No se encontraron skills válidas en la fuente seleccionada.');
+    cleanup(tmpDirToClean);
+    process.exit(0);
   }
   console.log();
 
+  // --- 4. SELECCIÓN DE AGENTES ---
   const detectedIds = AGENTS.filter(agent => {
     const root = path.join(PROJECT_ROOT, agent.dir.split('/')[0]);
     return fs.existsSync(root);
@@ -235,7 +507,6 @@ async function main() {
     return a.name.localeCompare(b.name);
   });
 
-  // 1. Preguntar IDEs
   const responseAgents = await prompts({
     type: 'multiselect',
     name: 'ids',
@@ -250,85 +521,84 @@ async function main() {
     optionsPerPage: 10,
     instructions: pc.dim('\n  ↑/↓: Mover | Espacio: Marcar | Intro: Confirmar')
   }, {
-    onCancel: () => { console.log(pc.red('Operación cancelada.')); process.exit(0); }
+    onCancel: () => {
+      cleanup(tmpDirToClean);
+      console.log(pc.red('Operación cancelada.'));
+      process.exit(0);
+    }
   });
 
   const selectedAgentIds = responseAgents.ids;
 
-  // 2. Preguntar Skills (¡AQUÍ ESTÁ LA BÚSQUEDA EN TIEMPO REAL!)
-  let finalSkills =[];
-  if (availableSkills.length > 0) {
-    let activeSkillsSet = new Set();
-    for (const agentId of selectedAgentIds) {
-      const agent = AGENTS.find(a => a.id === agentId);
-      const agentPath = path.join(PROJECT_ROOT, agent.dir);
-      if (fs.existsSync(agentPath)) {
-        try {
-          fs.readdirSync(agentPath).filter(name => availableSkills.includes(name)).forEach(s => activeSkillsSet.add(s));
-        } catch (e) {}
-      }
+  // --- 5. SELECCIÓN DE SKILLS ---
+  // Pre-marcar las que ya están en PROJECT_SKILLS_DIR
+  const alreadyInstalledSkills = listSkillsIn(PROJECT_SKILLS_DIR);
+
+  const responseSkills = await prompts({
+    type: 'autocompleteMultiselect',
+    name: 'skills',
+    message: 'Selecciona las Skills a instalar (Escribe para buscar):',
+    choices: availableSkills.map(s => ({
+      title: alreadyInstalledSkills.includes(s) ? `${s} ${pc.dim('(ya instalada)')}` : s,
+      value: s,
+      selected: alreadyInstalledSkills.includes(s)
+    })),
+    optionsPerPage: 12,
+    instructions: pc.dim('\n  Teclado: Buscar | Espacio: Marcar | Intro: Confirmar')
+  }, {
+    onCancel: () => {
+      cleanup(tmpDirToClean);
+      console.log(pc.red('Operación cancelada.'));
+      process.exit(0);
     }
-    
-    const activeSkills = Array.from(activeSkillsSet);
+  });
 
-    // autocompleteMultiselect: Permite escribir para buscar
-    const responseSkills = await prompts({
-      type: 'autocompleteMultiselect',
-      name: 'skills',
-      message: 'Selecciona las Skills a vincular (Escribe para buscar):',
-      choices: availableSkills.map(s => ({
-        title: s,
-        value: s,
-        selected: activeSkills.includes(s)
-      })),
-      optionsPerPage: 12,
-      instructions: pc.dim('\n  Teclado: Buscar | Espacio: Marcar | Intro: Confirmar')
-    }, {
-      onCancel: () => { console.log(pc.red('Operación cancelada.')); process.exit(0); }
-    });
+  const finalSkills = responseSkills.skills || [];
 
-    finalSkills = responseSkills.skills ||[];
-  }
-
-  // Preguntar si crear la estructura `docs/` para documentación
+  // --- 6. DOCS Y TOOLS (opcional) ---
   const docsResponse = await prompts({
     type: 'confirm',
     name: 'createDocs',
-    message: '¿Crear estructura `docs/` para documentación del proyecto (architecture.md, decisions/, runbooks/, architecture/)?',
+    message: '¿Crear estructura `docs/` para documentación del proyecto?',
     initial: true
   }, {
-    onCancel: () => { console.log(pc.red('Operación cancelada.')); process.exit(0); }
+    onCancel: () => {
+      cleanup(tmpDirToClean);
+      console.log(pc.red('Operación cancelada.'));
+      process.exit(0);
+    }
   });
 
   if (docsResponse.createDocs) {
     try {
       if (!fs.existsSync(DOCS_DIR)) fs.mkdirSync(DOCS_DIR, { recursive: true });
-
       if (!fs.existsSync(ARCHITECTURE_MD_PATH)) {
         fs.writeFileSync(ARCHITECTURE_MD_PATH, ARCHITECTURE_TEMPLATE);
         logStep(`Se ha creado ${pc.green('docs/architecture.md')}.`);
       }
-
       const decisionsDir = path.join(DOCS_DIR, 'decisions');
       const runbooksDir = path.join(DOCS_DIR, 'runbooks');
       const architectureDir = path.join(DOCS_DIR, 'architecture');
       if (!fs.existsSync(decisionsDir)) fs.mkdirSync(decisionsDir, { recursive: true });
       if (!fs.existsSync(runbooksDir)) fs.mkdirSync(runbooksDir, { recursive: true });
       if (!fs.existsSync(architectureDir)) fs.mkdirSync(architectureDir, { recursive: true });
-      logStep(`Se han creado ${pc.green('docs/decisions/')} y ${pc.green('docs/runbooks/')} (vacías).`);
+      logStep(`Creadas ${pc.green('docs/decisions/')} y ${pc.green('docs/runbooks/')}.`);
     } catch (err) {
-      console.error(pc.red('Error al crear docs/:'), err.message);
+      logError(`Error al crear docs/: ${err.message}`);
     }
   }
 
-  // Preguntar si crear la estructura `tools/` (scripts/ prompts/)
   const toolsResponse = await prompts({
     type: 'confirm',
     name: 'createTools',
     message: '¿Crear estructura `tools/` con `scripts/` y `prompts/`?',
     initial: false
   }, {
-    onCancel: () => { console.log(pc.red('Operación cancelada.')); process.exit(0); }
+    onCancel: () => {
+      cleanup(tmpDirToClean);
+      console.log(pc.red('Operación cancelada.'));
+      process.exit(0);
+    }
   });
 
   if (toolsResponse.createTools) {
@@ -337,131 +607,79 @@ async function main() {
       const toolsPrompts = path.join(TOOLS_DIR, 'prompts');
       if (!fs.existsSync(toolsScripts)) fs.mkdirSync(toolsScripts, { recursive: true });
       if (!fs.existsSync(toolsPrompts)) fs.mkdirSync(toolsPrompts, { recursive: true });
-      logStep(`Se han creado ${pc.green('tools/scripts/')} y ${pc.green('tools/prompts/')} (vacías).`);
+      logStep(`Creadas ${pc.green('tools/scripts/')} y ${pc.green('tools/prompts/')}.`);
     } catch (err) {
-      console.error(pc.red('Error al crear tools/:'), err.message);
+      logError(`Error al crear tools/: ${err.message}`);
     }
   }
 
+  // --- 7. INSTALACIÓN ---
   console.log();
   process.stdout.write(pc.cyan('Sincronizando el entorno...\n'));
 
   try {
-    let ops = { links: 0, cleaned: 0, copies: 0 };
+    // 7a. Copiar skills seleccionadas a skills/ raíz (fuente de verdad del proyecto)
+    // Solo si la fuente no ES ya el PROJECT_SKILLS_DIR
+    let installResult = { installed: 0, skipped: 0 };
+    if (sourceResponse.source !== 'project') {
+      installResult = installSkillsToRoot(SKILLS_SOURCE_DIR, finalSkills);
+    } else {
+      // Fuente = proyecto actual: skills ya están en su sitio
+      installResult.skipped = finalSkills.length;
+    }
+
+    // 7b. Crear symlinks en cada carpeta de agente → skills/ raíz
+    let ops = { links: 0, copies: 0, skipped: 0 };
 
     for (const agentId of selectedAgentIds) {
       const agent = AGENTS.find(a => a.id === agentId);
-      const destDir = path.join(PROJECT_ROOT, agent.dir);
-      const destRootDir = path.dirname(destDir);
+      const agentSkillsDir = path.join(PROJECT_ROOT, agent.dir);
+      const agentRootDir = path.dirname(agentSkillsDir);
 
-      if (!fs.existsSync(destRootDir)) fs.mkdirSync(destRootDir, { recursive: true });
-      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      if (!fs.existsSync(agentRootDir)) fs.mkdirSync(agentRootDir, { recursive: true });
+      if (!fs.existsSync(agentSkillsDir)) fs.mkdirSync(agentSkillsDir, { recursive: true });
 
+      // Limpieza de symlinks rotos (mantenimiento silencioso)
+      cleanBrokenSymlinks(agentSkillsDir);
+
+      // Directorios extra para copilot
       if (agentId === 'copilot') {
-        const githubDirs = ['.github/agents', '.github/instructions', '.github/prompts'];
-        githubDirs.forEach(dir => {
+        ['.github/agents', '.github/instructions', '.github/prompts'].forEach(dir => {
           const dirPath = path.join(PROJECT_ROOT, dir);
           if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
         });
       }
 
+      // Directorios extra para universal (opencode)
       if (agentId === 'universal') {
         const opencodeDir = path.join(PROJECT_ROOT, '.opencode');
-        const subdirs = ['agents', 'commands', 'modes', 'plugins', 'skills', 'tools'];
         if (!fs.existsSync(opencodeDir)) fs.mkdirSync(opencodeDir, { recursive: true });
-        subdirs.forEach(sd => {
+        ['agents', 'commands', 'modes', 'plugins', 'skills', 'tools'].forEach(sd => {
           const p = path.join(opencodeDir, sd);
           if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
         });
-        logStep(`Se ha creado la carpeta ${pc.green('.opencode/')} con subdirectorios básicos.`);
+        logStep(`Creada carpeta ${pc.green('.opencode/')} con subdirectorios básicos.`);
 
-        // Sincronizar skills también en .opencode/skills para compatibilidad con OpenCode
+        // Symlinks también en .opencode/skills
         const opencodeSkillsDir = path.join(opencodeDir, 'skills');
-        const installedOpencodeSkills = fs.readdirSync(opencodeSkillsDir);
-        for (const item of installedOpencodeSkills) {
-          if (item === '.DS_Store') continue;
-
-          if (!finalSkills.includes(item)) {
-            const itemPath = path.join(opencodeSkillsDir, item);
-            try {
-              const stat = fs.lstatSync(itemPath);
-              if (stat.isDirectory()) {
-                fs.rmSync(itemPath, { recursive: true, force: true });
-              } else {
-                fs.unlinkSync(itemPath);
-              }
-            } catch (err) {}
-          }
-        }
-
+        cleanBrokenSymlinks(opencodeSkillsDir);
         for (const skill of finalSkills) {
-          const src = path.join(SKILLS_DIR, skill);
-          const dest = path.join(opencodeSkillsDir, skill);
-
-          if (fs.existsSync(dest)) {
-            const stats = fs.lstatSync(dest);
-            if (stats.isSymbolicLink()) continue;
-            if (stats.isDirectory()) {
-              fs.rmSync(dest, { recursive: true, force: true });
-            }
-          }
-
-          try {
-            const type = process.platform === 'win32' ? 'junction' : 'dir';
-            const relPath = path.relative(opencodeSkillsDir, src);
-            fs.symlinkSync(relPath, dest, type);
-          } catch (e) {
-            try { fs.cpSync(src, dest, { recursive: true }); } catch (err) {}
-          }
+          const result = installSymlinkForAgent(opencodeSkillsDir, skill);
+          if (result === 'linked') ops.links++;
+          else if (result === 'copied') ops.copies++;
+          else if (result === 'skip') ops.skipped++;
         }
       }
 
-      // LIMPIEZA PROFUNDA
-      const installedItems = fs.readdirSync(destDir);
-      for (const item of installedItems) {
-        if (item === '.DS_Store') continue;
-
-        if (!finalSkills.includes(item)) {
-          const itemPath = path.join(destDir, item);
-          try {
-            const stat = fs.lstatSync(itemPath);
-            if (stat.isDirectory()) {
-              fs.rmSync(itemPath, { recursive: true, force: true });
-            } else {
-              fs.unlinkSync(itemPath); 
-            }
-            ops.cleaned++;
-          } catch (err) {}
-        }
-      }
-
-      // INSTALACIÓN
+      // Symlinks en la carpeta del agente
       for (const skill of finalSkills) {
-        const src = path.join(SKILLS_DIR, skill);
-        const dest = path.join(destDir, skill);
-
-        if (fs.existsSync(dest)) {
-          const stats = fs.lstatSync(dest);
-          if (stats.isSymbolicLink()) continue; 
-          if (stats.isDirectory()) {
-            fs.rmSync(dest, { recursive: true, force: true }); 
-          }
-        }
-
-        try {
-          const type = process.platform === 'win32' ? 'junction' : 'dir';
-          const relPath = path.relative(destDir, src);
-          fs.symlinkSync(relPath, dest, type);
-          ops.links++;
-        } catch (e) {
-          try {
-            fs.cpSync(src, dest, { recursive: true });
-            ops.copies++;
-          } catch (err) {}
-        }
+        const result = installSymlinkForAgent(agentSkillsDir, skill);
+        if (result === 'linked') ops.links++;
+        else if (result === 'copied') ops.copies++;
+        else if (result === 'skip') ops.skipped++;
       }
 
-      // EXTRAS (AGENTS.md)
+      // EXTRAS (AGENTS.md → copilot-instructions.md, CLAUDE.md, GEMINI.md)
       if (agent.extra) {
         const srcFile = path.join(PROJECT_ROOT, agent.extra.src);
         if (fs.existsSync(srcFile)) {
@@ -475,17 +693,40 @@ async function main() {
 
     console.log(pc.green('¡Completado!\n'));
 
-    let msg = `✨ Entorno listo. ${pc.bold(ops.links)} skills vinculadas`;
-    if (ops.copies > 0) msg += ` y ${ops.copies} copias`;
-    if (ops.cleaned > 0) msg += ` (🧹 ${ops.cleaned} residuos eliminados)`;
-    
+    // Resumen de instalación
+    if (installResult.installed > 0) {
+      logStep(`${pc.green(installResult.installed)} skills copiadas a ${pc.bold('skills/')} (fuente de verdad).`);
+    }
+    if (installResult.skipped > 0) {
+      logStep(`${pc.dim(installResult.skipped)} skills ya existían en ${pc.bold('skills/')} — sin cambios (additive).`);
+    }
+
+    let msg = `✨ Entorno listo. ${pc.bold(ops.links)} symlinks creados`;
+    if (ops.copies > 0) msg += ` y ${ops.copies} copias de respaldo`;
+    if (ops.skipped > 0) msg += ` (${ops.skipped} ya estaban vinculados)`;
+
     console.log(pc.green(msg));
     console.log();
 
   } catch (error) {
     console.log(pc.red('\nError durante la instalación:'));
     console.error(error.message);
+  } finally {
+    // Siempre limpiar el directorio temporal del repo remoto
+    cleanup(tmpDirToClean);
   }
+}
+
+/**
+ * Elimina el directorio temporal si existe.
+ */
+function cleanup(tmpDir) {
+  if (!tmpDir) return;
+  try {
+    if (fs.existsSync(tmpDir)) {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  } catch { }
 }
 
 main();
